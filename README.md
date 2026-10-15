@@ -2,19 +2,17 @@
 
 Aplicativo para ler QR Codes/códigos de barras, digitar o nome de cada item e registrar manualmente se ele confere com o Kronos da empresa. Exporta CSV e XLSX com exatamente **Código**, **Nome** e **Confere no Kronos?**.
 
-## O que foi entregue
+## Versão 1.1.0
 
-Projeto-fonte Android nativo, Gradle Wrapper, testes do núcleo e testes Android, documentação e workflow de geração de APK. **O APK de teste 1.0.0 foi compilado com sucesso pelo GitHub Actions.** Compilação Android, lint e os testes de exportação passaram; a execução em aparelho/emulador ainda não foi validada.
+Cada leitura abre um formulário de conferência; o item só é salvo ao confirmar. Inclui edição e exclusão de coletas e itens, restauração por Desfazer, detecção de repetidos e contagem por código. A revisão das dez heurísticas de Nielsen está em [docs/UX-1.1.md](docs/UX-1.1.md).
 
-Build: https://github.com/EuDavidev/Coletafacil/actions/runs/38747876293
-
-Em **Artifacts**, baixe **ColetaFacil-APK-debug** e extraia `app-debug.apk`. O APK exige Android 8.0 ou superior. SHA-256 do arquivo APK: `f87417ca7ac90ba6d2398731e8712b81e1f1204791777405f1ec232281fb0ac0`.
+O APK exige Android 8.0 ou superior. O workflow gera o artefato **ColetaFacil-APK-debug**, contendo `app-debug.apk`. Compilação, lint, exportações e **8 testes instrumentados (zero falhas)** passaram. Consulte [docs/VALIDACAO-1.1.md](docs/VALIDACAO-1.1.md) para a execução validada e a assinatura do APK.
 
 ## Gerar e instalar o APK
 
 Você precisa de um computador com Android Studio e JDK 17.
 
-1. Extraia o ZIP e abra a pasta `ColetaFacil` no Android Studio.
+1. Clone este repositório e abra a pasta do projeto no Android Studio.
 2. Aguarde a sincronização. Instale o Android SDK Platform 35 quando solicitado.
 3. No terminal da pasta, execute:
 
@@ -35,20 +33,20 @@ Android mínimo: **8.0 (API 26)**. A versão debug é para instalação e teste;
 
 ### Gerar no GitHub Actions
 
-O arquivo `.github/workflows/android.yml` está publicado e foi executado com sucesso neste repositório. A cada push de código, ele compila o APK e disponibiliza o artefato **ColetaFacil-APK-debug**. Ele executa compilação, lint e testes do núcleo; os testes de câmera/Compose exigem dispositivo ou emulador.
+O arquivo `.github/workflows/android.yml` está publicado e foi executado com sucesso neste repositório. A cada push de código, ele compila o APK e disponibiliza o artefato **ColetaFacil-APK-debug**. Ele executa compilação, lint, testes do núcleo e testes instrumentados de Room/Compose em emulador Android API 30. A câmera e a vibração físicas precisam de validação em aparelho.
 
 ## Como usar
 
 1. Toque em **Nova coleta** e dê um nome à lista.
-2. Abra **Escanear** e permita a câmera. Aponte para o código; cada leitura gravada aparece no contador.
-3. Para ler de novo o mesmo código, retire-o do enquadramento por pelo menos um instante (600 ms) e apresente novamente. Repetições intencionais geram linhas separadas.
-4. Em **Registros**, toque em um item para digitar **Nome** e escolher **Pendente**, **Sim** ou **Não** em **Confere no Kronos?**. A conferência é feita por você, consultando o Kronos.
-5. Registros existentes salvam após uma breve pausa na digitação; **Concluído** também salva antes de fechar. Espere a indicação **Alterações salvas no celular**. Uma entrada manual nova é criada somente em **Adicionar**.
-6. Use os filtros **Sem nome**, **Pendentes** e **Não confere** para revisar.
-7. Toque em **Finalizar e exportar**, escolha XLSX ou CSV e selecione o destino. A coleta só é finalizada após o arquivo ser gravado com sucesso. Cancelar o seletor mantém a coleta como estava.
-8. Para corrigir uma coleta finalizada, toque em **Reabrir coleta**. A exclusão de um item oferece **Desfazer**.
+2. Abra **Escanear**, permita a câmera e aponte para o código. A detecção vibra e pausa a leitura; nenhum registro é salvo ainda.
+3. Digite o nome obrigatório, escolha **Pendente**, **Sim** ou **Não** para a conferência manual no Kronos e toque em **Confirmar item**. Cancelar não adiciona o item.
+4. Se o código já existir nessa coleta, abra o item existente ou marque **Registrar outra unidade deste código** e confirme. Cada unidade confirmada ocupa uma linha. Retire o código do enquadramento por pelo menos 600 ms antes de ler a mesma etiqueta novamente.
+5. Em **Registros**, use busca e filtros, incluindo **Repetidos**. Os contadores distinguem registros, códigos únicos e unidades adicionais.
+6. Use **Editar** ou **Excluir** nos menus de três pontos das coletas e dos itens. Alterações só são gravadas ao confirmar. Exclusões identificam o alvo, pedem confirmação e oferecem **Desfazer**; uma coleta restaurada recupera também seus itens.
+7. Toque em **Finalizar e exportar**, escolha XLSX ou CSV e selecione o destino. A coleta só é finalizada após a gravação do arquivo. Cancelar o seletor mantém a coleta como estava.
+8. Editar ou excluir itens de uma coleta finalizada reabre a coleta para revisão. Arquivos exportados anteriormente não mudam; exporte novamente após corrigir.
 
-Sem nome e Pendente são permitidos na exportação e são mostrados na revisão. Exportar a partir de uma lista filtrada sempre inclui **todos os registros da coleta**, não apenas os visíveis.
+**Pendente** continua permitido. Registros sem nome existentes na versão anterior podem ser revisados ou exportados; novas confirmações exigem nome. Exportar uma lista filtrada sempre inclui **todos os registros da coleta**. A vibração depende do aparelho e de suas configurações. Há ajuda no próprio aplicativo.
 
 ## CSV ou XLSX?
 
@@ -59,6 +57,8 @@ Sem nome e Pendente são permitidos na exportação e são mostrados na revisão
 ## Dados e permissões
 
 As coletas ficam no banco local do app. Não há conta nem integração automática com o Kronos. A câmera usa o modelo ML Kit incorporado. O manifesto remove permissões de rede herdadas; a operação principal não depende de conexão. O usuário escolhe o destino pelo seletor de arquivos do Android, sem permissão ampla de armazenamento.
+
+**Atualização do APK de teste:** a assinatura de debug gerada por cada execução pode mudar. Se o Android recusar a atualização por incompatibilidade, exporte todas as coletas da versão instalada antes de considerar desinstalá-la. A nova versão não importa essas planilhas automaticamente.
 
 Arquivos exportados ficam no destino escolhido. Desinstalar o aplicativo ou limpar seus dados remove as coletas locais; mantenha as exportações necessárias.
 
@@ -81,7 +81,7 @@ bash gradlew :core:check :app:assembleDebug :app:lintDebug
 bash gradlew :app:connectedDebugAndroidTest
 ```
 
-Os testes instrumentados cobrem os dados e a entrada manual. Ainda é necessário validar câmera real, permissões, reinício do aplicativo, cancelamento de exportação, fonte máxima, TalkBack e orientação paisagem. Não se afirma que esses testes foram executados aqui.
+Os testes instrumentados cobrem persistência, edição, exclusão/restauração, confirmação, cancelamento e duplicidade. Resultados por versão estão em docs/VALIDACAO-1.1.md. Câmera/vibração reais, TalkBack, fonte máxima e o uso prolongado precisam de validação em aparelho.
 
 ## Estrutura
 

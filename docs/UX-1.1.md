@@ -8,7 +8,7 @@ Identificar código → vibrar e pausar a câmera → apresentar código, nome e
 
 Nenhum registro é criado pela mera detecção. Nome obrigatório na confirmação; conferência Pendente continua permitida. Cancelar descarta somente o rascunho. Códigos repetidos mostram a quantidade já presente e oferecem abrir o existente ou confirmar explicitamente outra unidade. Cada unidade confirmada ocupa uma linha; a exportação mantém Código, Nome e Confere no Kronos?.
 
-Coletas e itens terão ações Editar e Excluir visíveis por menu. Exclusões pedem confirmação, identificam o alvo e oferecem Desfazer. Restaurar uma coleta recupera também seus itens em uma transação. Editar ou excluir itens de uma coleta finalizada reabre a coleta, sem alterar arquivos já exportados. Não haverá migração destrutiva do banco.
+Coletas e itens têm ações Editar e Excluir visíveis por menu. Exclusões pedem confirmação, identificam o alvo e oferecem Desfazer. Restaurar uma coleta recupera também seus itens em uma transação. Editar ou excluir itens de uma coleta finalizada reabre a coleta, sem alterar arquivos já exportados. O banco mantém a versão de esquema anterior, sem migração destrutiva. Um identificador estável por formulário evita que tentativas após recriação da tela gerem unidades extras. O salvamento pertence ao ViewModel e só encerra o rascunho correspondente; a ação de Desfazer fica no ViewModel durante sua disponibilidade, inclusive após rotação.
 
 ## Aplicação das dez heurísticas de Nielsen
 

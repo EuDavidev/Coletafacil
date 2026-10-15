@@ -1,4 +1,6 @@
-# Validação da entrega
+# Validação da versão 1.0.0
+
+Relatório histórico. Para a versão atual, consulte [VALIDACAO-1.1.md](VALIDACAO-1.1.md).
 
 ## Resultado disponível
 
