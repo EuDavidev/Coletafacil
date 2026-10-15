@@ -2,13 +2,16 @@
 
 ## Resultado disponível
 
-Projeto-fonte Android implementado e revisado. **APK não gerado neste ambiente.** Não foi executada uma compilação Android, teste de câmera real, emulador ou renderização de Compose.
+Projeto-fonte Android implementado e revisado. **APK de teste 1.0.0 gerado com sucesso no GitHub Actions**, execução https://github.com/EuDavidev/Coletafacil/actions/runs/38747876293, commit `7b2ecf0bc79f5d8b701535a626f660d269753c59`. Compilação Android e lint passaram. Teste de câmera real, emulador e renderização de Compose ainda não foram executados.
+
+APK: pacote `br.com.coletafacil`, versão `1.0.0`, Android mínimo API 26, target API 35, 41.995.511 bytes. ZIP interno, manifesto binário e presença do bloco de assinatura APK conferidos. SHA-256: `f87417ca7ac90ba6d2398731e8712b81e1f1204791777405f1ec232281fb0ac0`.
 
 ## Verificações executadas
 
 | Verificação | Resultado |
 |---|---|
 | Compilação do núcleo Java real com Java 17, destino Java 8 | Aprovada |
+| Compilação Android assembleDebug e lintDebug no GitHub Actions | Aprovadas |
 | Testes do núcleo | 21 asserções aprovadas |
 | CSV aberto pelo leitor independente Python csv | Aprovado |
 | XLSX aberto pelo openpyxl | Aprovado |
@@ -30,17 +33,18 @@ Uma revisão independente examinou o projeto completo, incluindo fluxo de ediç�
 - A disposição da prévia limpa reservas de leitura interrompidas. Uma leitura já reconhecida termina sua gravação e registra a confirmação junto ao controle de repetição, mesmo que a prévia seja fechada durante a gravação.
 - Ajuste de recursos: o compressor ZIP usado na exportação XLSX é fechado de forma determinística, mantendo a propriedade do stream de destino com o chamador. Os arquivos resultantes foram revalidados após o ajuste.
 
-## Ferramentas que não puderam executar
+## Limite local e validação na nuvem
 
 O SDK Android não estava instalado. A tentativa de `bash gradlew :app:assembleDebug` não conseguiu baixar o Gradle 8.11.1: `java.net.SocketException: Network is unreachable`. Pedidos aos servidores de dependências pelo proxy configurado também expiraram. Não houve tentativa de contornar a restrição de rede.
 
-Por isso, ficam pendentes:
+Depois de publicar o projeto, a primeira execução falhou ao tentar instalar o pacote Android legado `tools`. O workflow foi corrigido para instalar `platform-tools`. A execução seguinte concluiu `assembleDebug`, `lintDebug`, `core:check` e a verificação independente das planilhas com sucesso.
 
-- Compilação Android e lint.
+Ficam pendentes:
+
 - Execução dos testes instrumentados Room e Compose incluídos.
 - Teste real de QR Code, código de barras, lanterna, permissões e câmera.
 - Persistência após encerrar e reiniciar o processo do app no aparelho.
 - Cancelamento/erro de exportação com provedores de documentos reais.
 - Layout em celular pequeno, tablet, paisagem, fonte máxima e TalkBack.
 
-O workflow fornecido pode executar a compilação, lint e testes do núcleo em um repositório com Actions habilitado. Não foi publicado nem executado durante esta entrega.
+O workflow foi publicado e executado neste repositório. O APK foi obtido do artefato oficial dessa execução; não houve execução em celular ou emulador durante esta entrega.
