@@ -32,7 +32,7 @@ data class AppState(
 data class DeletedCollection(val collection: CollectionEntity, val items: List<ItemEntity>)
 data class UiMessage(val text: String, val undo: ItemEntity? = null, val undoCollection: DeletedCollection? = null)
 data class PendingUndo(val message: UiMessage, val token: String = UUID.randomUUID().toString(), val deadline: Long = SystemClock.elapsedRealtime() + 60_000)
-data class PendingScan(val collectionId: String, val code: String) : Serializable
+data class PendingScan(val collectionId: String, val code: String, val requestId: String = UUID.randomUUID().toString()) : Serializable
 data class SaveFeedback(val success: Boolean, val message: String? = null)
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -119,7 +119,7 @@ class AppViewModel(application: Application, private val saved: SavedStateHandle
                 }
             }
             if (result.success) {
-                if (pendingScan.value?.collectionId == collectionId) cancelScan()
+                if (pendingScan.value?.requestId == draftId) cancelScan()
                 result.message?.let { notify(it) }
             }
             result

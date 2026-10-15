@@ -119,7 +119,7 @@ fun ColetaApp(model: AppViewModel) {
     if ((manual || item != null || pending != null) && selected != null) {
         val scanned = pending
         ItemEditor(item = if (manual || scanned != null) null else item,
-            capturedCode = scanned?.code, existingItems = state.items,
+            capturedCode = scanned?.code, requestId = scanned?.requestId, existingItems = state.items,
             onDismiss = { manual = false; editingId = null; model.cancelScan() },
             onDelete = { if (item != null) deleteItemId = item.id },
             onOpenExisting = { existing -> model.cancelScan(); manual = false; page = 2; editingId = existing.id },

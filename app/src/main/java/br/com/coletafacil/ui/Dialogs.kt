@@ -47,11 +47,11 @@ fun CollectionTitleDialog(collection: CollectionEntity?, onDismiss: () -> Unit, 
 fun ItemEditor(
     item: ItemEntity?, onDismiss: () -> Unit, onDelete: () -> Unit,
     onSave: suspend (String, String, String, Boolean, String) -> SaveFeedback,
-    capturedCode: String? = null, existingItems: List<ItemEntity> = emptyList(),
+    capturedCode: String? = null, requestId: String? = null, existingItems: List<ItemEntity> = emptyList(),
     onOpenExisting: (ItemEntity) -> Unit = {},
 ) {
     val draftKey = item?.id ?: capturedCode ?: "manual"
-    val draftId = rememberSaveable(draftKey) { UUID.randomUUID().toString() }
+    val draftId = rememberSaveable(draftKey, requestId) { requestId ?: UUID.randomUUID().toString() }
     var code by rememberSaveable(draftKey) { mutableStateOf(item?.code ?: capturedCode.orEmpty()) }
     var name by rememberSaveable(draftKey) { mutableStateOf(item?.name.orEmpty()) }
     var status by rememberSaveable(draftKey) { mutableStateOf(item?.status ?: KronosStatus.PENDING) }

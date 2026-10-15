@@ -24,7 +24,13 @@ class ScanWorkflowTest {
         try {
             instrumentation.runOnMainSync { model = AppViewModel(app, SavedStateHandle(mapOf("selected" to id))); assertTrue(model.beginScan(id, "0001")) }
             assertTrue(dao.itemsSnapshot(id).isEmpty())
-            assertTrue(model.submitItem(id, null, "0001", "Bomba", "Pendente", false).success)
+            val firstRequest = model.pendingScan.value!!.requestId
+            assertTrue(model.submitItem(id, null, "0001", "Bomba", "Pendente", false, firstRequest).success)
+            assertNull(model.pendingScan.value)
+            instrumentation.runOnMainSync { assertTrue(model.beginScan(id, "0002")) }
+            val newerRequest = model.pendingScan.value!!.requestId
+            assertTrue(model.submitItem(id, null, "0001", "Bomba", "Pendente", false, firstRequest).success)
+            assertEquals(newerRequest, model.pendingScan.value!!.requestId)
             assertEquals(1, dao.itemsSnapshot(id).size)
             instrumentation.runOnMainSync { model.cancelScan() }
             assertFalse(model.submitItem(id, null, "0001", "Bomba", "Sim", false).success)
