@@ -2,6 +2,8 @@ package br.com.coletafacil
 
 import android.app.Application
 import android.net.Uri
+import android.os.SystemClock
+import java.util.UUID
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
@@ -29,6 +31,7 @@ data class AppState(
 }
 data class DeletedCollection(val collection: CollectionEntity, val items: List<ItemEntity>)
 data class UiMessage(val text: String, val undo: ItemEntity? = null, val undoCollection: DeletedCollection? = null)
+data class PendingUndo(val message: UiMessage, val token: String = UUID.randomUUID().toString(), val deadline: Long = SystemClock.elapsedRealtime() + 60_000)
 data class PendingScan(val collectionId: String, val code: String) : Serializable
 data class SaveFeedback(val success: Boolean, val message: String? = null)
 
@@ -43,6 +46,9 @@ class AppViewModel(application: Application, private val saved: SavedStateHandle
     val pendingScan = saved.getStateFlow<PendingScan?>("pendingScan", null)
     private val messagesChannel = Channel<UiMessage>(Channel.BUFFERED)
     val messages = messagesChannel.receiveAsFlow()
+    private val _pendingUndo = MutableStateFlow<PendingUndo?>(null)
+    val pendingUndo = _pendingUndo.asStateFlow()
+    fun consumeUndo(token: String) { if (_pendingUndo.value?.token == token) _pendingUndo.value = null }
     private val activeItems = selection.flatMapLatest { id -> if (id == null) flowOf(emptyList()) else dao.observeItems(id) }
     val state = combine(dao.observeCollections(), selection, activeItems) { collections, id, items ->
         AppState(collections, id, items.filter { it.collectionId == id }, false)
@@ -67,15 +73,16 @@ class AppViewModel(application: Application, private val saved: SavedStateHandle
         catch (_: Exception) { notify("Não foi possível salvar a alteração. Tente novamente.") }
     }
 
-    suspend fun saveCollectionTitle(id: String?, title: String): Boolean {
+    suspend fun saveCollectionTitle(id: String?, title: String, draftId: String = UUID.randomUUID().toString()): Boolean = viewModelScope.async {
         val value = title.trim()
-        if (value.isBlank() || value.length > 100) return false
-        return try {
+        if (value.isBlank() || value.length > 100) return@async false
+        try {
             val selected = withContext(Dispatchers.IO) {
                 lock.withLock {
                     if (id == null) {
-                        val collection = CollectionEntity(title = value)
-                        dao.insertCollection(collection)
+                        val collection = CollectionEntity(id = draftId, title = value)
+                        if (dao.collection(draftId) == null) dao.insertCollection(collection)
+                        else dao.renameCollection(draftId, value)
                         collection.id
                     } else {
                         if (dao.collection(id) == null) return@withLock null
@@ -83,44 +90,47 @@ class AppViewModel(application: Application, private val saved: SavedStateHandle
                         id
                     }
                 }
-            } ?: return false
+            } ?: return@async false
             if (id == null) select(selected)
             notify(if (id == null) "Coleta criada." else "Nome da coleta atualizado.")
             true
         } catch (e: CancellationException) { throw e }
         catch (_: Exception) { false }
-    }
+    }.await()
 
-    suspend fun submitItem(collectionId: String, itemId: String?, code: String, name: String, status: String, allowDuplicate: Boolean): SaveFeedback {
-        return try {
+    suspend fun submitItem(collectionId: String, itemId: String?, code: String, name: String, status: String, allowDuplicate: Boolean, draftId: String = UUID.randomUUID().toString()): SaveFeedback = viewModelScope.async {
+        try {
             val result = withContext(Dispatchers.IO) {
                 lock.withLock {
                     database.withTransaction {
                         val collection = dao.collection(collectionId)
                             ?: return@withTransaction SaveFeedback(false, "Esta coleta não está mais disponível.")
                         if (itemId == null && collection.closed) return@withTransaction SaveFeedback(false, "Reabra a coleta antes de adicionar itens.")
-                        val current = itemId?.let { dao.item(it) }
+                        val current = dao.item(itemId ?: draftId)
                         if (itemId != null && current?.collectionId != collectionId) return@withTransaction SaveFeedback(false, "O item foi excluído. Volte à lista de registros.")
-                        val duplicates = if (current?.code == code) 0 else dao.duplicates(collectionId, code, itemId.orEmpty()).size
+                        val duplicates = if (current?.code == code) 0 else dao.duplicates(collectionId, code, itemId ?: draftId).size
                         val validation = EntryRules.validate(code, name, status, duplicates, allowDuplicate)
                         if (validation != EntryRules.Result.OK) return@withTransaction SaveFeedback(false, validation.message)
-                        if (itemId == null) dao.insertItem(ItemEntity(collectionId = collectionId, code = code, name = name.trim(), status = status))
-                        else { dao.updateItem(itemId, code, name.trim(), status); dao.setClosed(collectionId, false) }
+                        if (current == null) dao.insertItem(ItemEntity(id = draftId, collectionId = collectionId, code = code, name = name.trim(), status = status))
+                        else { dao.updateItem(current.id, code, name.trim(), status); if (itemId != null) dao.setClosed(collectionId, false) }
                         val count = dao.itemsSnapshot(collectionId).size
                         SaveFeedback(true, if (itemId == null) "Item confirmado · $count registros na coleta." else "Item atualizado. A coleta está aberta para revisão.")
                     }
                 }
             }
-            if (result.success) result.message?.let { notify(it) }
+            if (result.success) {
+                if (pendingScan.value?.collectionId == collectionId) cancelScan()
+                result.message?.let { notify(it) }
+            }
             result
         } catch (e: CancellationException) { throw e }
         catch (_: Exception) { SaveFeedback(false, "Não foi possível salvar. Seus dados continuam neste formulário. Tente novamente.") }
-    }
+    }.await()
 
     fun delete(item: ItemEntity) = mutation {
         val current = dao.item(item.id) ?: return@mutation
         database.withTransaction { dao.deleteItem(current.id); dao.setClosed(current.collectionId, false) }
-        messagesChannel.send(UiMessage("Item excluído.", current))
+        _pendingUndo.value = PendingUndo(UiMessage("Item excluído.", current))
     }
     fun restore(item: ItemEntity) = mutation {
         database.withTransaction {
@@ -136,7 +146,7 @@ class AppViewModel(application: Application, private val saved: SavedStateHandle
             if (selection.value == id) select(null)
             if (pendingScan.value?.collectionId == id) cancelScan()
         }
-        messagesChannel.send(UiMessage("Coleta e seus ${backup.items.size} itens excluídos.", undoCollection = backup))
+        _pendingUndo.value = PendingUndo(UiMessage("Coleta e seus ${backup.items.size} itens excluídos.", undoCollection = backup))
     }
     fun restoreCollection(backup: DeletedCollection) = mutation {
         database.withTransaction { dao.insertCollection(backup.collection); dao.insertItems(backup.items) }

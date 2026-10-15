@@ -19,6 +19,8 @@ import br.com.coletafacil.AppViewModel
 import br.com.coletafacil.camera.ScannerScreen
 import br.com.coletafacil.data.ItemEntity
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.withTimeoutOrNull
+import android.os.SystemClock
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -28,6 +30,7 @@ fun ColetaApp(model: AppViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
     val busy by model.exporting.collectAsStateWithLifecycle()
     val pending by model.pendingScan.collectAsStateWithLifecycle()
+    val undo by model.pendingUndo.collectAsStateWithLifecycle()
     val selected = state.selected
     var page by rememberSaveable(state.selectedId) { mutableIntStateOf(0) }
     var newCollection by rememberSaveable { mutableStateOf(false) }
@@ -44,13 +47,20 @@ fun ColetaApp(model: AppViewModel) {
 
     LaunchedEffect(model) {
         model.messages.collectLatest { message ->
-            val undo = message.undo != null || message.undoCollection != null
-            val result = snackbar.showSnackbar(message.text, actionLabel = if (undo) "Desfazer" else null, withDismissAction = true, duration = if (undo) SnackbarDuration.Long else SnackbarDuration.Short)
+            snackbar.showSnackbar(message.text, withDismissAction = true, duration = SnackbarDuration.Short)
+        }
+    }
+    LaunchedEffect(undo?.token) {
+        val action = undo ?: return@LaunchedEffect
+        val remaining = action.deadline - SystemClock.elapsedRealtime()
+        if (remaining > 0) {
+            val result = withTimeoutOrNull(remaining) { snackbar.showSnackbar(action.message.text, actionLabel = "Desfazer", withDismissAction = true, duration = SnackbarDuration.Long) }
             if (result == SnackbarResult.ActionPerformed) {
-                message.undo?.let { model.restore(it) }
-                message.undoCollection?.let { model.restoreCollection(it) }
+                action.message.undo?.let { model.restore(it) }
+                action.message.undoCollection?.let { model.restoreCollection(it) }
             }
         }
+        model.consumeUndo(action.token)
     }
     val xlsxPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) { uri ->
         val id = exportId; exportId = null
@@ -104,7 +114,7 @@ fun ColetaApp(model: AppViewModel) {
     val renamed = state.collections.firstOrNull { it.collection.id == renameId }?.collection
     if (newCollection || renamed != null) CollectionTitleDialog(collection = if (newCollection) null else renamed,
         onDismiss = { newCollection = false; renameId = null },
-        onSave = { model.saveCollectionTitle(if (newCollection) null else renamed?.id, it) })
+        onSave = { title, draftId -> model.saveCollectionTitle(if (newCollection) null else renamed?.id, title, draftId) })
     val item = state.items.firstOrNull { it.id == editingId }
     if ((manual || item != null || pending != null) && selected != null) {
         val scanned = pending
@@ -113,8 +123,8 @@ fun ColetaApp(model: AppViewModel) {
             onDismiss = { manual = false; editingId = null; model.cancelScan() },
             onDelete = { if (item != null) deleteItemId = item.id },
             onOpenExisting = { existing -> model.cancelScan(); manual = false; page = 2; editingId = existing.id },
-            onSave = { code, name, status, allowDuplicate ->
-                model.submitItem(scanned?.collectionId ?: selected.collection.id, if (manual || scanned != null) null else item?.id, code, name, status, allowDuplicate)
+            onSave = { code, name, status, allowDuplicate, draftId ->
+                model.submitItem(scanned?.collectionId ?: selected.collection.id, if (manual || scanned != null) null else item?.id, code, name, status, allowDuplicate, draftId)
             },
         )
     }

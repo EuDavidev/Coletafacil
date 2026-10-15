@@ -21,9 +21,11 @@ import br.com.coletafacil.SaveFeedback
 import br.com.coletafacil.core.EntryRules
 import br.com.coletafacil.data.*
 import kotlinx.coroutines.launch
+import java.util.UUID
 
 @Composable
-fun CollectionTitleDialog(collection: CollectionEntity?, onDismiss: () -> Unit, onSave: suspend (String) -> Boolean) {
+fun CollectionTitleDialog(collection: CollectionEntity?, onDismiss: () -> Unit, onSave: suspend (String, String) -> Boolean) {
+    val draftId = rememberSaveable(collection?.id) { UUID.randomUUID().toString() }
     var title by rememberSaveable(collection?.id) { mutableStateOf(collection?.title.orEmpty()) }
     var saving by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf(false) }
@@ -35,7 +37,7 @@ fun CollectionTitleDialog(collection: CollectionEntity?, onDismiss: () -> Unit, 
             OutlinedTextField(value = title, onValueChange = { if (it.length <= 100) { title = it; error = false } }, label = { Text("Nome da coleta") }, singleLine = true, enabled = !saving, modifier = Modifier.fillMaxWidth().testTag("collection-title"), keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
             if (error) Text("Não foi possível salvar. Confira o nome e tente novamente.", color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive })
         } },
-        confirmButton = { Button(onClick = { scope.launch { saving = true; try { if (onSave(title)) onDismiss() else error = true } finally { saving = false } } }, enabled = !saving && title.isNotBlank()) { Text(if (saving) "Salvando…" else if (collection == null) "Criar coleta" else "Salvar nome") } },
+        confirmButton = { Button(onClick = { scope.launch { saving = true; try { if (onSave(title, draftId)) onDismiss() else error = true } finally { saving = false } } }, enabled = !saving && title.isNotBlank()) { Text(if (saving) "Salvando…" else if (collection == null) "Criar coleta" else "Salvar nome") } },
         dismissButton = { TextButton(onClick = onDismiss, enabled = !saving) { Text("Cancelar") } },
     )
 }
@@ -44,11 +46,12 @@ fun CollectionTitleDialog(collection: CollectionEntity?, onDismiss: () -> Unit, 
 @Composable
 fun ItemEditor(
     item: ItemEntity?, onDismiss: () -> Unit, onDelete: () -> Unit,
-    onSave: suspend (String, String, String, Boolean) -> SaveFeedback,
+    onSave: suspend (String, String, String, Boolean, String) -> SaveFeedback,
     capturedCode: String? = null, existingItems: List<ItemEntity> = emptyList(),
     onOpenExisting: (ItemEntity) -> Unit = {},
 ) {
     val draftKey = item?.id ?: capturedCode ?: "manual"
+    val draftId = rememberSaveable(draftKey) { UUID.randomUUID().toString() }
     var code by rememberSaveable(draftKey) { mutableStateOf(item?.code ?: capturedCode.orEmpty()) }
     var name by rememberSaveable(draftKey) { mutableStateOf(item?.name.orEmpty()) }
     var status by rememberSaveable(draftKey) { mutableStateOf(item?.status ?: KronosStatus.PENDING) }
@@ -57,12 +60,13 @@ fun ItemEditor(
     var submitted by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var discard by remember { mutableStateOf(false) }
+    var openAfterDiscard by remember { mutableStateOf<ItemEntity?>(null) }
     val scope = rememberCoroutineScope()
-    val duplicates = if (item != null && code == item.code) emptyList() else existingItems.filter { it.id != item?.id && it.code == code }
+    val duplicates = if (item != null && code == item.code) emptyList() else existingItems.filter { it.id != item?.id && it.id != draftId && it.code == code }
     val allowDuplicate = acknowledgedCode == code && duplicates.isNotEmpty()
     val validation = EntryRules.validate(code, name, status, duplicates.size, allowDuplicate)
     val dirty = code != (item?.code ?: capturedCode.orEmpty()) || name != item?.name.orEmpty() || status != (item?.status ?: KronosStatus.PENDING)
-    val close: () -> Unit = { if (!saving) { if (dirty) discard = true else onDismiss() } }
+    val close: () -> Unit = { if (!saving) { if (dirty) { openAfterDiscard = null; discard = true } else onDismiss() } }
     AlertDialog(
         onDismissRequest = close,
         properties = DialogProperties(dismissOnClickOutside = false),
@@ -76,7 +80,7 @@ fun ItemEditor(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Icon(Icons.Outlined.WarningAmber, null); Text("Código já presente · ${duplicates.size} registros", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Assertive }) }
                         Text(duplicates.first().name.ifBlank { "Item existente sem nome" })
                         Text("Nada foi adicionado novamente. Você pode editar o item existente ou registrar outra unidade.", style = MaterialTheme.typography.bodySmall)
-                        TextButton(onClick = { onOpenExisting(duplicates.first()) }, enabled = !saving) { Text("Abrir item existente") }
+                        TextButton(onClick = { if (dirty) { openAfterDiscard = duplicates.first(); discard = true } else onOpenExisting(duplicates.first()) }, enabled = !saving) { Text("Abrir item existente") }
                         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(enabled = !saving) { acknowledgedCode = if (allowDuplicate) null else code }, verticalAlignment = Alignment.CenterVertically) {
                             Checkbox(checked = allowDuplicate, onCheckedChange = { acknowledgedCode = if (it) code else null }, enabled = !saving, modifier = Modifier.testTag("duplicate-ack"))
                             Text("Registrar outra unidade deste código", modifier = Modifier.weight(1f))
@@ -101,13 +105,13 @@ fun ItemEditor(
             if (validation != EntryRules.Result.OK) error = validation.message
             else scope.launch {
                 saving = true
-                try { val result = onSave(code, name, status, allowDuplicate); if (result.success) onDismiss() else error = result.message }
+                try { val result = onSave(code, name, status, allowDuplicate, draftId); if (result.success) onDismiss() else error = result.message }
                 finally { saving = false }
             }
         }, enabled = !saving && (duplicates.isEmpty() || allowDuplicate), modifier = Modifier.testTag("editor-save")) { Text(if (saving) "Salvando…" else if (item != null) "Salvar alterações" else if (allowDuplicate) "Confirmar outra unidade" else "Confirmar item") } },
         dismissButton = { TextButton(onClick = close, enabled = !saving) { Text("Cancelar") } },
     )
-    if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text("Descartar alterações?") }, text = { Text("Os dados deste formulário ainda não foram gravados. Os itens confirmados continuam salvos.") }, confirmButton = { TextButton(onClick = onDismiss) { Text("Descartar") } }, dismissButton = { TextButton(onClick = { discard = false }) { Text("Continuar preenchendo") } })
+    if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text("Descartar alterações?") }, text = { Text("Os dados deste formulário ainda não foram gravados. Os itens confirmados continuam salvos.") }, confirmButton = { TextButton(onClick = { val target = openAfterDiscard; discard = false; if (target == null) onDismiss() else onOpenExisting(target) }) { Text("Descartar") } }, dismissButton = { TextButton(onClick = { discard = false }) { Text("Continuar preenchendo") } })
 }
 
 @Composable
