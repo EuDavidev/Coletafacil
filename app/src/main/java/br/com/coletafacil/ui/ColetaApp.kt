@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -16,6 +17,8 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import br.com.coletafacil.AppViewModel
 import br.com.coletafacil.camera.ScannerScreen
+import br.com.coletafacil.data.ItemEntity
+import kotlinx.coroutines.flow.collectLatest
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
@@ -24,19 +27,29 @@ import java.time.format.DateTimeFormatter
 fun ColetaApp(model: AppViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
     val busy by model.exporting.collectAsStateWithLifecycle()
+    val pending by model.pendingScan.collectAsStateWithLifecycle()
     val selected = state.selected
     var page by rememberSaveable(state.selectedId) { mutableIntStateOf(0) }
     var newCollection by rememberSaveable { mutableStateOf(false) }
+    var renameId by rememberSaveable { mutableStateOf<String?>(null) }
+    var deleteCollectionId by rememberSaveable { mutableStateOf<String?>(null) }
+    var deleteItemId by rememberSaveable { mutableStateOf<String?>(null) }
     var manual by rememberSaveable { mutableStateOf(false) }
     var editingId by rememberSaveable { mutableStateOf<String?>(null) }
+    var help by rememberSaveable { mutableStateOf(false) }
     var exportDialog by rememberSaveable { mutableStateOf(false) }
     var exportId by rememberSaveable { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
+    val overlay = pending != null || manual || editingId != null || help || renameId != null || deleteCollectionId != null || deleteItemId != null || exportDialog || busy
 
     LaunchedEffect(model) {
-        model.messages.collect { message ->
-            val result = snackbar.showSnackbar(message.text, actionLabel = if (message.undo != null) "Desfazer" else null, withDismissAction = true, duration = if (message.undo != null) SnackbarDuration.Long else SnackbarDuration.Short)
-            if (result == SnackbarResult.ActionPerformed) message.undo?.let { model.restore(it) }
+        model.messages.collectLatest { message ->
+            val undo = message.undo != null || message.undoCollection != null
+            val result = snackbar.showSnackbar(message.text, actionLabel = if (undo) "Desfazer" else null, withDismissAction = true, duration = if (undo) SnackbarDuration.Long else SnackbarDuration.Short)
+            if (result == SnackbarResult.ActionPerformed) {
+                message.undo?.let { model.restore(it) }
+                message.undoCollection?.let { model.restoreCollection(it) }
+            }
         }
     }
     val xlsxPicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) { uri ->
@@ -47,14 +60,18 @@ fun ColetaApp(model: AppViewModel) {
         val id = exportId; exportId = null
         if (uri != null && id != null) model.export(uri, id, false)
     }
-    BackHandler(enabled = state.selectedId != null && !busy) { if (page != 0) page = 0 else model.select(null) }
+    BackHandler(enabled = state.selectedId != null && !overlay) { if (page != 0) page = 0 else model.select(null) }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = { TopAppBar(
             title = { Text(selected?.collection?.title ?: "Coleta Fácil", maxLines = 2, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.titleLarge) },
             navigationIcon = {
-                if (state.selectedId != null) IconButton(onClick = { if (!busy) model.select(null) }) { Icon(Icons.Outlined.ArrowBack, "Voltar para coletas") }
+                if (state.selectedId != null) IconButton(onClick = { if (!overlay) model.select(null) }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Voltar para coletas") }
                 else Icon(Icons.Outlined.QrCodeScanner, null, Modifier.padding(start = 20.dp, end = 8.dp), tint = MaterialTheme.colorScheme.primary)
+            },
+            actions = {
+                IconButton(onClick = { help = true }) { Icon(Icons.Outlined.HelpOutline, "Ajuda para usar o aplicativo") }
+                if (selected != null) ActionMenu("coleta", "Opções da coleta ${selected.collection.title}", onEdit = { renameId = selected.collection.id }, onDelete = { deleteCollectionId = selected.collection.id })
             },
             colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
         ) },
@@ -62,7 +79,7 @@ fun ColetaApp(model: AppViewModel) {
             if (selected != null) NavigationBar {
                 val labels = listOf("Resumo", "Escanear", "Registros")
                 val icons = listOf(Icons.Outlined.SpaceDashboard, Icons.Outlined.QrCodeScanner, Icons.Outlined.FactCheck)
-                labels.forEachIndexed { index, label -> NavigationBarItem(selected = page == index, onClick = { if (!busy) page = index }, icon = { Icon(icons[index], null) }, label = { Text(label) }, enabled = !busy) }
+                labels.forEachIndexed { index, label -> NavigationBarItem(selected = page == index, onClick = { if (!overlay) page = index }, icon = { Icon(icons[index], null) }, label = { Text(label) }, enabled = !overlay) }
             }
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -70,33 +87,42 @@ fun ColetaApp(model: AppViewModel) {
         Box(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding).imePadding()) {
             when {
                 state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                selected == null -> HomeScreen(state.collections, onNew = { newCollection = true }, onOpen = { model.select(it) })
+                selected == null -> HomeScreen(state.collections, onNew = { newCollection = true }, onOpen = { model.select(it) }, onRename = { renameId = it.id }, onDelete = { deleteCollectionId = it.collection.id })
                 else -> {
-                    val onEdit: (br.com.coletafacil.data.ItemEntity) -> Unit = { item ->
-                        if (selected.collection.closed) model.notify("Reabra a coleta no resumo para editar.") else { page = 2; editingId = item.id }
-                    }
+                    val edit: (ItemEntity) -> Unit = { item -> page = 2; editingId = item.id }
+                    val delete: (ItemEntity) -> Unit = { deleteItemId = it.id }
                     when (page) {
-                        1 -> ScannerScreen(collectionId = selected.collection.id, total = selected.total, closed = selected.collection.closed, gate = model.scanGate(selected.collection.id),
-                            onCode = { model.addCode(selected.collection.id, it) }, onReview = { page = 2 }, onManual = { page = 2; manual = true })
-                        2 -> RecordsScreen(selected.collection.id, state.items, selected.collection.closed, onEdit, onManual = { manual = true }, onExport = { exportDialog = true })
-                        else -> SummaryScreen(selected, state.items, onScan = { page = 1 }, onRecords = { page = 2 }, onExport = { exportDialog = true }, onReopen = { model.reopen(selected.collection.id) }, onEdit = onEdit)
+                        1 -> ScannerScreen(collectionId = selected.collection.id, total = selected.total, closed = selected.collection.closed, gate = model.scanGate(selected.collection.id), knownCodes = state.items.map { it.code }.toSet(), reviewing = overlay,
+                            onCode = { if (overlay) false else model.beginScan(selected.collection.id, it) }, onReview = { page = 2 }, onManual = { manual = true })
+                        2 -> RecordsScreen(selected.collection.id, state.items, selected.collection.closed, edit, delete, onManual = { manual = true }, onExport = { exportDialog = true })
+                        else -> SummaryScreen(selected, state.items, onScan = { page = 1 }, onRecords = { page = 2 }, onExport = { exportDialog = true }, onReopen = { model.reopen(selected.collection.id) }, onEdit = edit, onDelete = delete)
                     }
                 }
             }
         }
     }
-    if (newCollection) NewCollectionDialog(onDismiss = { newCollection = false }, onCreate = { model.create(it); newCollection = false })
+    val renamed = state.collections.firstOrNull { it.collection.id == renameId }?.collection
+    if (newCollection || renamed != null) CollectionTitleDialog(collection = if (newCollection) null else renamed,
+        onDismiss = { newCollection = false; renameId = null },
+        onSave = { model.saveCollectionTitle(if (newCollection) null else renamed?.id, it) })
     val item = state.items.firstOrNull { it.id == editingId }
-    if ((manual || item != null) && selected != null && !selected.collection.closed) {
-        ItemEditor(item = if (manual) null else item,
-            onDismiss = { manual = false; editingId = null },
-            onDelete = { item?.let { model.delete(it) }; editingId = null },
-            onSave = { code, name, status ->
-                if (manual) model.addManual(selected.collection.id, code, name, status)
-                else if (item != null) model.updateItem(item.id, code, name, status) else false
+    if ((manual || item != null || pending != null) && selected != null) {
+        val scanned = pending
+        ItemEditor(item = if (manual || scanned != null) null else item,
+            capturedCode = scanned?.code, existingItems = state.items,
+            onDismiss = { manual = false; editingId = null; model.cancelScan() },
+            onDelete = { if (item != null) deleteItemId = item.id },
+            onOpenExisting = { existing -> model.cancelScan(); manual = false; page = 2; editingId = existing.id },
+            onSave = { code, name, status, allowDuplicate ->
+                model.submitItem(scanned?.collectionId ?: selected.collection.id, if (manual || scanned != null) null else item?.id, code, name, status, allowDuplicate)
             },
         )
     }
+    val deletedCollection = state.collections.firstOrNull { it.collection.id == deleteCollectionId }
+    if (deletedCollection != null) DeleteConfirmation("Excluir coleta?", "A coleta “${deletedCollection.collection.title}” e seus ${deletedCollection.total} itens serão excluídos. Você poderá tocar em Desfazer na mensagem seguinte.", onDismiss = { deleteCollectionId = null }, onConfirm = { model.deleteCollection(deletedCollection.collection.id); deleteCollectionId = null })
+    val deletedItem = state.items.firstOrNull { it.id == deleteItemId }
+    if (deletedItem != null) DeleteConfirmation("Excluir item?", "Excluir “${deletedItem.name.ifBlank { deletedItem.code }}” (código ${deletedItem.code}) desta coleta? Você poderá desfazer na mensagem seguinte.", onDismiss = { deleteItemId = null }, onConfirm = { model.delete(deletedItem); deleteItemId = null; editingId = null })
+    if (help) HelpDialog { help = false }
     if (exportDialog && selected != null) ExportDialog(selected.total, selected.pending, selected.unnamed, onDismiss = { exportDialog = false }, onChoose = { xlsx ->
         exportDialog = false; exportId = selected.collection.id
         val cleanTitle = selected.collection.title.replace(Regex("[^\\p{L}\\p{N}._-]+"), "_").take(65).ifBlank { "coleta" }

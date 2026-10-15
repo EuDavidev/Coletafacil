@@ -5,6 +5,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.SystemClock
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,8 +30,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.semantics.*
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -40,15 +40,14 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import br.com.coletafacil.core.ScanGate
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.common.InputImage
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.CoroutineStart
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
 @Composable
 fun ScannerScreen(
     collectionId: String, total: Int, closed: Boolean, gate: ScanGate,
-    onCode: suspend (String) -> Boolean, onReview: () -> Unit, onManual: () -> Unit,
+    knownCodes: Set<String>, reviewing: Boolean,
+    onCode: (String) -> Boolean, onReview: () -> Unit, onManual: () -> Unit,
 ) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current
@@ -60,7 +59,6 @@ fun ScannerScreen(
     var cameraError by remember { mutableStateOf<String?>(null) }
     var flash by remember { mutableStateOf(false) }
     var hasFlash by remember { mutableStateOf(false) }
-    val haptic = LocalHapticFeedback.current
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted = it; asked = true }
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) granted = permissionGranted() }
@@ -69,26 +67,34 @@ fun ScannerScreen(
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Text("Aponte. Leia. Continue.", style = MaterialTheme.typography.headlineSmall)
-        Text("Os códigos entram na coleta automaticamente. Preencha os nomes depois.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Uma leitura. Uma confirmação.", style = MaterialTheme.typography.headlineSmall)
+        Text("A câmera pausa em cada leitura. Confira o nome e o Kronos antes de confirmar o item.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Box(Modifier.fillMaxWidth().height(310.dp).clip(RoundedCornerShape(28.dp)).background(Color(0xFF0F172A))) {
             when {
                 closed -> CameraMessage("Coleta finalizada", "Reabra a coleta no resumo para adicionar registros.")
                 !granted -> CameraMessage("Sua câmera, sua coleta", "Permita o acesso para ler QR Codes e códigos de barras.")
                 cameraError != null -> CameraMessage("Câmera indisponível", cameraError!!)
+                reviewing -> CameraMessage("Confira o item identificado", "A câmera está pausada até confirmar ou cancelar o formulário.")
                 paused -> CameraMessage("Leitura pausada", "Seus registros estão salvos. Retome quando quiser.")
                 else -> CameraPreview(
                     key = collectionId, gate = gate, torch = flash, onHasFlash = { hasFlash = it },
                     onFailure = { cameraError = "Use a entrada manual ou tente abrir a câmera novamente." },
                     onCode = { code ->
-                        val saved = onCode(code)
-                        if (saved) { lastCode = code; haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
-                        else paused = true
-                        saved
+                        val recognized = onCode(code)
+                        if (recognized) {
+                            lastCode = code
+                            val vibrator = context.getSystemService(Vibrator::class.java)
+                            if (vibrator?.hasVibrator() == true) {
+                                try {
+                                    vibrator.vibrate(if (code in knownCodes) VibrationEffect.createWaveform(longArrayOf(0,35,70,35), -1) else VibrationEffect.createOneShot(55, VibrationEffect.DEFAULT_AMPLITUDE))
+                                } catch (_: Exception) { /* Visible confirmation remains available. */ }
+                            }
+                        }
+                        recognized
                     },
                 )
             }
-            if (granted && !paused && !closed && cameraError == null) {
+            if (granted && !paused && !closed && !reviewing && cameraError == null) {
                 Canvas(Modifier.align(Alignment.Center).size(215.dp)) {
                     val stroke = 4.dp.toPx(); val length = 32.dp.toPx(); val c = Color(0xFF6EE7B7)
                     listOf(Offset.Zero, Offset(size.width,0f), Offset(0f,size.height), Offset(size.width,size.height)).forEach { corner ->
@@ -112,8 +118,8 @@ fun ScannerScreen(
         if (cameraError != null && !closed) OutlinedButton(onClick = { cameraError = null }) { Text("Tentar câmera novamente") }
         Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(20.dp)) {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("$total registros nesta coleta", style = MaterialTheme.typography.titleMedium)
-                Text(if (lastCode.isEmpty()) "A próxima leitura aparece aqui." else "Último código salvo: $lastCode", modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }, maxLines = 3)
+                Text("$total registros confirmados · ${knownCodes.size} códigos únicos", style = MaterialTheme.typography.titleMedium)
+                Text(if (lastCode.isEmpty()) "O código identificado aparecerá no formulário de confirmação." else "Último código identificado: $lastCode", modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }, maxLines = 3)
             }
         }
         if (granted && !closed && cameraError == null) OutlinedButton(onClick = { paused = !paused; flash = false }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
@@ -122,7 +128,7 @@ fun ScannerScreen(
         }
         Button(onClick = onReview, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Text("Conferir registros") }
         if (!closed) TextButton(onClick = onManual, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Text("Digitar código manualmente") }
-        Text("Para repetir um código, retire-o da câmera por um instante e apresente novamente.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text("Após conferir, retire o código do enquadramento. Repetições mostram um aviso antes de adicionar outra unidade.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -139,10 +145,9 @@ private fun CameraMessage(title: String, message: String) {
 
 @androidx.annotation.OptIn(ExperimentalGetImage::class)
 @Composable
-private fun CameraPreview(key: String, gate: ScanGate, torch: Boolean, onHasFlash: (Boolean) -> Unit, onFailure: () -> Unit, onCode: suspend (String) -> Boolean) {
+private fun CameraPreview(key: String, gate: ScanGate, torch: Boolean, onHasFlash: (Boolean) -> Unit, onFailure: () -> Unit, onCode: (String) -> Boolean) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val scope = rememberCoroutineScope()
     val currentOnCode by rememberUpdatedState(onCode)
     val currentFailure by rememberUpdatedState(onFailure)
     val preview = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER; implementationMode = PreviewView.ImplementationMode.COMPATIBLE } }
@@ -166,12 +171,11 @@ private fun CameraPreview(key: String, gate: ScanGate, torch: Boolean, onHasFlas
                         if (!alive.get() || !lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@addOnSuccessListener
                         val visible = barcodes.mapNotNull { it.rawValue }.toCollection(linkedSetOf())
                         val code = gate.candidate(visible, SystemClock.elapsedRealtime())
-                        if (code != null) scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                        if (code != null) {
                             try {
                                 if (alive.get() && currentOnCode(code)) gate.accepted(code)
                             } finally {
-                                // Cancellation during preview disposal must never leave
-                                // the collection's retained gate locked in a pending save.
+                                // A detected code opens a draft; it does not insert a row.
                                 gate.failed(code)
                             }
                         }

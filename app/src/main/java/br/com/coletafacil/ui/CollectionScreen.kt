@@ -19,7 +19,7 @@ import br.com.coletafacil.data.*
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun SummaryScreen(summary: CollectionSummary, items: List<ItemEntity>, onScan: () -> Unit, onRecords: () -> Unit, onExport: () -> Unit, onReopen: () -> Unit, onEdit: (ItemEntity) -> Unit) {
+fun SummaryScreen(summary: CollectionSummary, items: List<ItemEntity>, onScan: () -> Unit, onRecords: () -> Unit, onExport: () -> Unit, onReopen: () -> Unit, onEdit: (ItemEntity) -> Unit, onDelete: (ItemEntity) -> Unit) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item {
             Card(shape = RoundedCornerShape(26.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
@@ -27,6 +27,7 @@ fun SummaryScreen(summary: CollectionSummary, items: List<ItemEntity>, onScan: (
                     Text(if (summary.collection.closed) "COLETA FINALIZADA" else "COLETA EM ANDAMENTO", style = MaterialTheme.typography.labelLarge)
                     Text(summary.total.toString(), style = MaterialTheme.typography.headlineLarge)
                     Text("registros nesta coleta", style = MaterialTheme.typography.titleMedium)
+                    Text("${items.map { it.code }.distinct().size} códigos únicos · ${items.size - items.map { it.code }.distinct().size} unidades adicionais", style = MaterialTheme.typography.bodyMedium)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         AssistChip(onClick = onRecords, label = { Text("${summary.unnamed} sem nome") }, leadingIcon = { Icon(Icons.Outlined.Edit, null, Modifier.size(18.dp)) })
                         AssistChip(onClick = onRecords, label = { Text("${summary.pending} pendentes") }, leadingIcon = { Icon(Icons.Outlined.Schedule, null, Modifier.size(18.dp)) })
@@ -58,20 +59,22 @@ fun SummaryScreen(summary: CollectionSummary, items: List<ItemEntity>, onScan: (
         }
         if (items.isNotEmpty()) {
             item { Text("Últimos registros", style = MaterialTheme.typography.titleLarge) }
-            items(items.take(3), key = { it.id }) { item -> ItemCard(item, onClick = { onEdit(item) }) }
+            items(items.take(3), key = { it.id }) { item -> ItemCard(item, onClick = { onEdit(item) }, onDelete = { onDelete(item) }) }
         }
     }
 }
 
 @Composable
-fun RecordsScreen(collectionId: String, records: List<ItemEntity>, closed: Boolean, onEdit: (ItemEntity) -> Unit, onManual: () -> Unit, onExport: () -> Unit) {
+fun RecordsScreen(collectionId: String, records: List<ItemEntity>, closed: Boolean, onEdit: (ItemEntity) -> Unit, onDelete: (ItemEntity) -> Unit, onManual: () -> Unit, onExport: () -> Unit) {
     var search by rememberSaveable(collectionId) { mutableStateOf("") }
     var filter by rememberSaveable(collectionId) { mutableStateOf("Todos") }
+    val quantities = records.groupingBy { it.code }.eachCount()
     val filtered = records.filter { item ->
         (item.code.contains(search, true) || item.name.contains(search, true)) && when (filter) {
             "Sem nome" -> item.name.isBlank()
             "Pendentes" -> item.status == KronosStatus.PENDING
             "Não confere" -> item.status == "Não"
+            "Repetidos" -> (quantities[item.code] ?: 0) > 1
             else -> true
         }
     }
@@ -80,31 +83,35 @@ fun RecordsScreen(collectionId: String, records: List<ItemEntity>, closed: Boole
         item { OutlinedTextField(value = search, onValueChange = { search = it }, label = { Text("Buscar código ou nome") }, singleLine = true, leadingIcon = { Icon(Icons.Outlined.Search, null) }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) }
         item {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("Todos", "Sem nome", "Pendentes", "Não confere").forEach { option -> FilterChip(selected = filter == option, onClick = { filter = option }, label = { Text(option) }, modifier = Modifier.heightIn(min = 48.dp)) }
+                listOf("Todos", "Sem nome", "Pendentes", "Não confere", "Repetidos").forEach { option -> FilterChip(selected = filter == option, onClick = { filter = option }, label = { Text(option) }, modifier = Modifier.heightIn(min = 48.dp)) }
             }
         }
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("${filtered.size} de ${records.size} registros", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("${filtered.size} de ${records.size} registros · ${quantities.size} códigos únicos", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 if (!closed) OutlinedButton(onClick = onManual, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)) { Icon(Icons.Outlined.Add, null); Spacer(Modifier.width(8.dp)); Text("Adicionar manualmente") }
-                else Text("Reabra a coleta no resumo para editar os registros.", style = MaterialTheme.typography.bodySmall)
+                else Text("Editar ou excluir um item reabre esta coleta para revisão.", style = MaterialTheme.typography.bodySmall)
             }
         }
         if (filtered.isEmpty()) item {
             Card(shape = RoundedCornerShape(22.dp)) { Column(Modifier.fillMaxWidth().padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { Icon(Icons.Outlined.Inventory2, null, tint = MaterialTheme.colorScheme.primary); Text(if (records.isEmpty()) "Ainda sem registros" else "Nenhum item neste filtro", style = MaterialTheme.typography.titleMedium); Text(if (records.isEmpty()) "Escaneie um código ou adicione o primeiro item manualmente." else "Tente outro nome, código ou filtro.") } }
         }
-        items(filtered, key = { it.id }) { item -> ItemCard(item, onClick = { onEdit(item) }) }
+        items(filtered, key = { it.id }) { item -> ItemCard(item, onClick = { onEdit(item) }, onDelete = { onDelete(item) }, quantity = quantities[item.code] ?: 1) }
         if (records.isNotEmpty()) item { OutlinedButton(onClick = onExport, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)) { Icon(Icons.Outlined.FileDownload, null); Spacer(Modifier.width(8.dp)); Text("Exportar coleta completa") } }
     }
 }
 
 @Composable
-fun ItemCard(item: ItemEntity, onClick: () -> Unit) {
+fun ItemCard(item: ItemEntity, onClick: () -> Unit, onDelete: () -> Unit, quantity: Int = 1) {
     Card(onClick = onClick, shape = RoundedCornerShape(20.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
         Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(item.name.ifBlank { "Nome a preencher" }, style = MaterialTheme.typography.titleMedium, color = if (item.name.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(item.name.ifBlank { "Nome a preencher" }, style = MaterialTheme.typography.titleMedium, color = if (item.name.isBlank()) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
+                ActionMenu("item", "Opções do item ${item.name.ifBlank { item.code }}", onEdit = onClick, onDelete = onDelete)
+            }
             Text(item.code, style = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace))
             StatusBadge(item.status)
+            if (quantity > 1) Text("$quantity registros com este código nesta coleta", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

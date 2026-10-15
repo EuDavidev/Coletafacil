@@ -55,6 +55,11 @@ interface ColetaDao {
     suspend fun item(id: String): ItemEntity?
     @Insert suspend fun insertCollection(collection: CollectionEntity)
     @Insert suspend fun insertItem(item: ItemEntity)
+    @Insert suspend fun insertItems(items: List<ItemEntity>)
+    @Query("SELECT * FROM items WHERE collectionId = :collectionId AND code = :code AND id != :exceptId ORDER BY createdAt DESC, id DESC")
+    suspend fun duplicates(collectionId: String, code: String, exceptId: String): List<ItemEntity>
+    @Query("UPDATE collections SET title = :title WHERE id = :id") suspend fun renameCollection(id: String, title: String)
+    @Query("DELETE FROM collections WHERE id = :id") suspend fun deleteCollection(id: String)
     @Query("UPDATE items SET code = :code, name = :name, status = :status WHERE id = :id")
     suspend fun updateItem(id: String, code: String, name: String, status: String)
     @Query("DELETE FROM items WHERE id = :id") suspend fun deleteItem(id: String)

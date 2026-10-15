@@ -12,6 +12,26 @@ import org.junit.runner.RunWith
 
 @RunWith(AndroidJUnit4::class)
 class DatabaseTest {
+    @Test fun collectionRenameDeletionAndRestorePreserveItems() = runBlocking {
+        val db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), ColetaDatabase::class.java).build()
+        try {
+            val dao = db.dao()
+            val collection = CollectionEntity(id = "c", title = "Antes", createdAt = 1)
+            val item = ItemEntity(id = "i", collectionId = "c", code = "0001", name = "Bomba", createdAt = 2)
+            dao.insertCollection(collection); dao.insertItem(item)
+            dao.renameCollection("c", "Depois")
+            assertEquals("Depois", dao.collection("c")!!.title)
+            assertEquals(1, dao.duplicates("c", "0001", "").size)
+            assertTrue(dao.duplicates("c", "0001", "i").isEmpty())
+            assertTrue(dao.duplicates("c", "1", "").isEmpty())
+            val snapshot = dao.collection("c")!!
+            dao.deleteCollection("c")
+            assertNull(dao.collection("c")); assertTrue(dao.itemsSnapshot("c").isEmpty())
+            dao.insertCollection(snapshot); dao.insertItems(listOf(item))
+            assertEquals(listOf(item), dao.itemsSnapshot("c"))
+        } finally { db.close() }
+    }
+
     @Test fun exactFieldsArePersistedAndCompletionIsExplicit() = runBlocking {
         val db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext(), ColetaDatabase::class.java).build()
         try {

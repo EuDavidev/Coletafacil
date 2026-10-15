@@ -1,105 +1,134 @@
 package br.com.coletafacil.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.WarningAmber
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.*
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
-import br.com.coletafacil.data.ItemEntity
-import br.com.coletafacil.data.KronosStatus
-import kotlinx.coroutines.delay
+import androidx.compose.ui.window.DialogProperties
+import br.com.coletafacil.SaveFeedback
+import br.com.coletafacil.core.EntryRules
+import br.com.coletafacil.data.*
 import kotlinx.coroutines.launch
 
 @Composable
-fun NewCollectionDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
-    var title by rememberSaveable { mutableStateOf("") }
-    AlertDialog(onDismissRequest = onDismiss,
-        title = { Text("Comece uma nova coleta") },
+fun CollectionTitleDialog(collection: CollectionEntity?, onDismiss: () -> Unit, onSave: suspend (String) -> Boolean) {
+    var title by rememberSaveable(collection?.id) { mutableStateOf(collection?.title.orEmpty()) }
+    var saving by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    AlertDialog(onDismissRequest = { if (!saving) onDismiss() },
+        title = { Text(if (collection == null) "Nova coleta" else "Editar coleta") },
         text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Dê um nome para encontrar esta conferência depois.")
-            OutlinedTextField(value = title, onValueChange = { if (it.length <= 100) title = it }, label = { Text("Nome da coleta") }, placeholder = { Text("Ex.: Conferência do almoxarifado") }, singleLine = true, modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
+            Text("Use um nome que ajude a identificar esta conferência.")
+            OutlinedTextField(value = title, onValueChange = { if (it.length <= 100) { title = it; error = false } }, label = { Text("Nome da coleta") }, singleLine = true, enabled = !saving, modifier = Modifier.fillMaxWidth().testTag("collection-title"), keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
+            if (error) Text("Não foi possível salvar. Confira o nome e tente novamente.", color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive })
         } },
-        confirmButton = { Button(onClick = { onCreate(title) }, enabled = title.isNotBlank()) { Text("Criar coleta") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        confirmButton = { Button(onClick = { scope.launch { saving = true; try { if (onSave(title)) onDismiss() else error = true } finally { saving = false } } }, enabled = !saving && title.isNotBlank()) { Text(if (saving) "Salvando…" else if (collection == null) "Criar coleta" else "Salvar nome") } },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !saving) { Text("Cancelar") } },
     )
 }
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun ItemEditor(item: ItemEntity?, onDismiss: () -> Unit, onDelete: () -> Unit, onSave: suspend (String, String, String) -> Boolean) {
-    var code by rememberSaveable(item?.id) { mutableStateOf(item?.code.orEmpty()) }
-    var name by rememberSaveable(item?.id) { mutableStateOf(item?.name.orEmpty()) }
-    var status by rememberSaveable(item?.id) { mutableStateOf(item?.status ?: KronosStatus.PENDING) }
-    var savedFields by remember(item?.id) { mutableStateOf(listOf(item?.code.orEmpty(), item?.name.orEmpty(), item?.status ?: KronosStatus.PENDING)) }
+fun ItemEditor(
+    item: ItemEntity?, onDismiss: () -> Unit, onDelete: () -> Unit,
+    onSave: suspend (String, String, String, Boolean) -> SaveFeedback,
+    capturedCode: String? = null, existingItems: List<ItemEntity> = emptyList(),
+    onOpenExisting: (ItemEntity) -> Unit = {},
+) {
+    val draftKey = item?.id ?: capturedCode ?: "manual"
+    var code by rememberSaveable(draftKey) { mutableStateOf(item?.code ?: capturedCode.orEmpty()) }
+    var name by rememberSaveable(draftKey) { mutableStateOf(item?.name.orEmpty()) }
+    var status by rememberSaveable(draftKey) { mutableStateOf(item?.status ?: KronosStatus.PENDING) }
+    var acknowledgedCode by rememberSaveable(draftKey) { mutableStateOf<String?>(null) }
     var saving by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf(false) }
+    var submitted by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
     var discard by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val currentSave by rememberUpdatedState(onSave)
-    val fields = listOf(code, name, status)
-    val dirty = fields != savedFields
-    val saveAndClose: () -> Unit = {
-        if (!saving) {
-            if (code.isBlank()) error = true
-            else scope.launch {
-                saving = true
-                try {
-                    val snapshot = listOf(code,name,status)
-                    if (currentSave(snapshot[0], snapshot[1], snapshot[2])) { savedFields = snapshot; onDismiss() }
-                    else error = true
-                } finally { saving = false }
-            }
-        }
-    }
-    // Existing records autosave after a brief typing pause. Closing flushes immediately.
-    LaunchedEffect(code, name, status) {
-        if (item != null && dirty && code.isNotBlank()) {
-            delay(500)
-            val snapshot = listOf(code, name, status)
-            saving = true
-            try {
-                if (currentSave(snapshot[0], snapshot[1], snapshot[2])) { savedFields = snapshot; error = false }
-                else error = true
-            } finally { saving = false }
-        }
-    }
-    val close: () -> Unit = {
-        when {
-            saving -> Unit
-            item != null && dirty -> saveAndClose()
-            item == null && dirty -> discard = true
-            else -> onDismiss()
-        }
-    }
+    val duplicates = if (item != null && code == item.code) emptyList() else existingItems.filter { it.id != item?.id && it.code == code }
+    val allowDuplicate = acknowledgedCode == code && duplicates.isNotEmpty()
+    val validation = EntryRules.validate(code, name, status, duplicates.size, allowDuplicate)
+    val dirty = code != (item?.code ?: capturedCode.orEmpty()) || name != item?.name.orEmpty() || status != (item?.status ?: KronosStatus.PENDING)
+    val close: () -> Unit = { if (!saving) { if (dirty) discard = true else onDismiss() } }
     AlertDialog(
         onDismissRequest = close,
-        title = { Text(if (item == null) "Adicionar registro" else "Editar registro") },
+        properties = DialogProperties(dismissOnClickOutside = false),
+        title = { Text(if (item != null) "Editar item" else if (capturedCode != null) "Código identificado" else "Adicionar item") },
         text = {
-            Column(Modifier.fillMaxWidth().heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(value = code, onValueChange = { code = it; error = false }, modifier = Modifier.fillMaxWidth().testTag("editor-code"), label = { Text("Código") }, isError = code.isBlank() && error, minLines = 1, maxLines = 4, enabled = !saving, supportingText = { if (code.isBlank() && error) Text("Informe o código.") else Text("Zeros iniciais serão preservados no app e no XLSX.") })
-                OutlinedTextField(value = name, onValueChange = { name = it }, modifier = Modifier.fillMaxWidth().testTag("editor-name"), label = { Text("Nome") }, placeholder = { Text("Digite o nome do item") }, minLines = 1, maxLines = 4, enabled = !saving, keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
-                Text("Confere no Kronos?", style = MaterialTheme.typography.titleMedium)
-                Text("Consulte o Kronos e informe o resultado da conferência.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    KronosStatus.values.forEach { option -> FilterChip(selected = status == option, onClick = { status = option }, label = { Text(option) }, enabled = !saving, modifier = Modifier.heightIn(min = 48.dp)) }
+            Column(Modifier.fillMaxWidth().heightIn(max = 460.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (capturedCode != null) Text("Leitura pausada. Confira os dados e confirme este item para continuar.", modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
+                OutlinedTextField(value = code, onValueChange = { code = it; acknowledgedCode = null; error = null }, modifier = Modifier.fillMaxWidth().testTag("editor-code"), label = { Text("Código") }, isError = submitted && code.isBlank(), minLines = 1, maxLines = 4, enabled = !saving, supportingText = { Text(if (submitted && code.isBlank()) "Informe o código." else "Código mantido como texto, incluindo zeros iniciais.") })
+                if (duplicates.isNotEmpty()) Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = MaterialTheme.shapes.medium) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Icon(Icons.Outlined.WarningAmber, null); Text("Código já presente · ${duplicates.size} registros", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f).semantics { liveRegion = LiveRegionMode.Assertive }) }
+                        Text(duplicates.first().name.ifBlank { "Item existente sem nome" })
+                        Text("Nada foi adicionado novamente. Você pode editar o item existente ou registrar outra unidade.", style = MaterialTheme.typography.bodySmall)
+                        TextButton(onClick = { onOpenExisting(duplicates.first()) }, enabled = !saving) { Text("Abrir item existente") }
+                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(enabled = !saving) { acknowledgedCode = if (allowDuplicate) null else code }, verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = allowDuplicate, onCheckedChange = { acknowledgedCode = if (it) code else null }, enabled = !saving, modifier = Modifier.testTag("duplicate-ack"))
+                            Text("Registrar outra unidade deste código", modifier = Modifier.weight(1f))
+                        }
+                    }
                 }
-                if (item != null) Text(if (saving) "Salvando alterações…" else if (error) "Não foi possível salvar. Tente novamente." else if (dirty) "Alterações aguardando salvamento" else "Alterações salvas no celular", style = MaterialTheme.typography.bodySmall, color = if (error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
-                if (item == null && error && code.isNotBlank()) Text("Não foi possível salvar. Tente novamente.", color = MaterialTheme.colorScheme.error)
-                if (item != null) TextButton(onClick = onDelete, enabled = !saving) { Text("Excluir registro", color = MaterialTheme.colorScheme.error) }
+                OutlinedTextField(value = name, onValueChange = { name = it; error = null }, modifier = Modifier.fillMaxWidth().testTag("editor-name"), label = { Text("Nome do item *") }, placeholder = { Text("Digite o nome do item") }, isError = submitted && name.isBlank(), supportingText = { Text(if (submitted && name.isBlank()) "Informe o nome para confirmar o item." else "* Campo obrigatório") }, minLines = 1, maxLines = 4, enabled = !saving, keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences))
+                Text("Confere no Kronos?", style = MaterialTheme.typography.titleMedium)
+                Text("Se ainda não conferiu, mantenha Pendente.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    KronosStatus.values.forEach { option -> FilterChip(selected = status == option, onClick = { status = option; error = null }, label = { Text(option) }, enabled = !saving, modifier = Modifier.heightIn(min = 48.dp)) }
+                }
+                if (error != null) Text(error!!, color = MaterialTheme.colorScheme.error, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Assertive })
+                if (item != null) {
+                    Text("As alterações serão gravadas ao tocar em Salvar alterações.", style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = onDelete, enabled = !saving) { Text("Excluir item", color = MaterialTheme.colorScheme.error) }
+                }
             }
         },
-        confirmButton = { Button(onClick = saveAndClose, enabled = !saving, modifier = Modifier.testTag("editor-save")) { Text(if (saving) "Salvando…" else if (item == null) "Adicionar" else "Concluído") } },
-        dismissButton = { TextButton(onClick = { if (item == null && dirty) discard = true else close() }, enabled = !saving) { Text(if (item == null) "Cancelar" else "Fechar") } },
+        confirmButton = { Button(onClick = {
+            submitted = true
+            if (validation != EntryRules.Result.OK) error = validation.message
+            else scope.launch {
+                saving = true
+                try { val result = onSave(code, name, status, allowDuplicate); if (result.success) onDismiss() else error = result.message }
+                finally { saving = false }
+            }
+        }, enabled = !saving && (duplicates.isEmpty() || allowDuplicate), modifier = Modifier.testTag("editor-save")) { Text(if (saving) "Salvando…" else if (item != null) "Salvar alterações" else if (allowDuplicate) "Confirmar outra unidade" else "Confirmar item") } },
+        dismissButton = { TextButton(onClick = close, enabled = !saving) { Text("Cancelar") } },
     )
-    if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text("Descartar este rascunho?") }, text = { Text("O registro ainda não foi adicionado à coleta.") }, confirmButton = { TextButton(onClick = onDismiss) { Text("Descartar") } }, dismissButton = { TextButton(onClick = { discard = false }) { Text("Continuar preenchendo") } })
+    if (discard) AlertDialog(onDismissRequest = { discard = false }, title = { Text("Descartar alterações?") }, text = { Text("Os dados deste formulário ainda não foram gravados. Os itens confirmados continuam salvos.") }, confirmButton = { TextButton(onClick = onDismiss) { Text("Descartar") } }, dismissButton = { TextButton(onClick = { discard = false }) { Text("Continuar preenchendo") } })
 }
 
+@Composable
+fun DeleteConfirmation(title: String, message: String, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { Text(message) }, confirmButton = { TextButton(onClick = onConfirm) { Text("Excluir", color = MaterialTheme.colorScheme.error) } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Manter") } })
+}
+
+@Composable
+fun HelpDialog(onDismiss: () -> Unit) {
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Como usar o Coleta Fácil") }, text = {
+        Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Text("1. Crie uma coleta e abra Escanear.")
+            Text("2. A leitura vibra e pausa. Digite o nome, informe a conferência e toque em Confirmar item. Cancelar não cria um registro.")
+            Text("3. Se o código já estiver na coleta, abra o item existente. Para outra unidade física, marque Registrar outra unidade e confirme. Cada unidade ocupa uma linha.")
+            Text("4. Os contadores mostram registros confirmados e códigos únicos. Um mesmo código pode ter várias unidades registradas.")
+            Text("5. Use o menu de três pontos para editar ou excluir coletas e itens. Após excluir, Desfazer restaura os dados enquanto a mensagem estiver disponível.")
+            Text("6. Exporte em XLSX ou CSV. Alterar itens de uma coleta finalizada reabre a coleta; arquivos já exportados não são alterados.")
+            Text("O código fica em texto. A conferência no Kronos é manual. A vibração depende do suporte e das configurações do aparelho.")
+        }
+    }, confirmButton = { TextButton(onClick = onDismiss) { Text("Entendi") } })
+}
 @Composable
 fun ExportDialog(total: Int, pending: Int, unnamed: Int, onDismiss: () -> Unit, onChoose: (Boolean) -> Unit) {
     var xlsx by rememberSaveable { mutableStateOf(true) }

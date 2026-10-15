@@ -14,6 +14,13 @@ public final class CoreTests {
     }
     static Set<String> codes(String... values) { return new LinkedHashSet<>(Arrays.asList(values)); }
     public static void main(String[] args) throws Exception {
+        check(EntryRules.validate("", "Item", "Pendente", 0, false) == EntryRules.Result.CODE_REQUIRED, "empty code cannot be confirmed");
+        check(EntryRules.validate("0001", "  ", "Pendente", 0, false) == EntryRules.Result.NAME_REQUIRED, "name required on each confirmed scan");
+        check(EntryRules.validate("0001", "Item", "Pendente", 0, false) == EntryRules.Result.OK, "pending Kronos status remains valid");
+        check(EntryRules.validate("0001", "Item", "Sim", 1, false) == EntryRules.Result.DUPLICATE, "duplicate never inserted without acknowledgement");
+        check(EntryRules.validate("0001", "Item", "Não", 2, true) == EntryRules.Result.OK, "intentional second unit may be confirmed");
+        check(EntryRules.validate("0001", "Item", "Confirmado", 0, false) == EntryRules.Result.STATUS_INVALID, "unknown status rejected");
+        check(EntryRules.validate("000000000123456789012345", "Item", "Sim", 0, false) == EntryRules.Result.OK, "long text code keeps zeros");
         ScanGate gate = new ScanGate();
         check("001234".equals(gate.candidate(codes("001234"), 0)), "first visible code must be offered");
         check(gate.candidate(codes("001234"), 50) == null, "in-flight save must not duplicate");

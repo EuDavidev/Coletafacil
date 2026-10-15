@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import br.com.coletafacil.data.CollectionSummary
+import br.com.coletafacil.data.CollectionEntity
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -19,7 +20,7 @@ import java.time.format.DateTimeFormatter
 fun dateLabel(time: Long): String = DateTimeFormatter.ofPattern("dd/MM/yyyy · HH:mm").withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(time))
 
 @Composable
-fun HomeScreen(collections: List<CollectionSummary>, onNew: () -> Unit, onOpen: (String) -> Unit) {
+fun HomeScreen(collections: List<CollectionSummary>, onNew: () -> Unit, onOpen: (String) -> Unit, onRename: (CollectionEntity) -> Unit, onDelete: (CollectionSummary) -> Unit) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         item {
             Card(shape = RoundedCornerShape(28.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondary, contentColor = MaterialTheme.colorScheme.onSecondary)) {
@@ -37,7 +38,7 @@ fun HomeScreen(collections: List<CollectionSummary>, onNew: () -> Unit, onOpen: 
                 Column(Modifier.fillMaxWidth().padding(28.dp), verticalArrangement = Arrangement.spacedBy(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Icon(Icons.Outlined.Inventory2, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(48.dp))
                     Text("Tudo pronto para começar", style = MaterialTheme.typography.titleMedium)
-                    Text("Crie uma coleta para escanear seus primeiros itens. Os nomes e a conferência podem ser preenchidos depois.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("Crie uma coleta. Cada leitura pede o nome do item e sua conferência antes de salvar.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
         }
@@ -48,7 +49,7 @@ fun HomeScreen(collections: List<CollectionSummary>, onNew: () -> Unit, onOpen: 
                         Icon(Icons.Outlined.FolderOpen, null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(12.dp))
                         Text(summary.collection.title, style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                        Icon(Icons.Outlined.ChevronRight, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        ActionMenu("coleta", "Opções da coleta ${summary.collection.title}", onEdit = { onRename(summary.collection) }, onDelete = { onDelete(summary) })
                     }
                     Text(dateLabel(summary.collection.createdAt), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text("${summary.total} registros · ${summary.pending} pendentes", style = MaterialTheme.typography.bodyMedium)
