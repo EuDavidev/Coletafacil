@@ -4,7 +4,11 @@ Aplicativo para ler QR Codes/códigos de barras, digitar o nome de cada item e r
 
 ## O que foi entregue
 
-Projeto-fonte Android nativo, Gradle Wrapper, testes do núcleo e testes Android, documentação e workflow de geração de APK. **Este pacote não inclui um APK compilado.** O ambiente de criação não tinha SDK Android e não conseguiu acessar a distribuição Gradle, portanto a compilação Android e a execução no aparelho não foram verificadas.
+Projeto-fonte Android nativo, Gradle Wrapper, testes do núcleo e testes Android, documentação e workflow de geração de APK. **O APK de teste 1.0.0 foi compilado com sucesso pelo GitHub Actions.** Compilação Android, lint e os testes de exportação passaram; a execução em aparelho/emulador ainda não foi validada.
+
+Build: https://github.com/EuDavidev/Coletafacil/actions/runs/38747876293
+
+Em **Artifacts**, baixe **ColetaFacil-APK-debug** e extraia `app-debug.apk`. O APK exige Android 8.0 ou superior. SHA-256 do arquivo APK: `f87417ca7ac90ba6d2398731e8712b81e1f1204791777405f1ec232281fb0ac0`.
 
 ## Gerar e instalar o APK
 
@@ -31,7 +35,7 @@ Android mínimo: **8.0 (API 26)**. A versão debug é para instalação e teste;
 
 ### Gerar no GitHub Actions
 
-O arquivo `.github/workflows/android.yml` está incluído, mas não foi publicado nem executado em uma conta GitHub. Se o projeto for enviado a um repositório com Actions habilitado, o workflow poderá compilar e disponibilizar o APK no artefato **ColetaFacil-APK-debug**. Ele executa compilação, lint e testes do núcleo; os testes de câmera/Compose exigem dispositivo ou emulador.
+O arquivo `.github/workflows/android.yml` está publicado e foi executado com sucesso neste repositório. A cada push de código, ele compila o APK e disponibiliza o artefato **ColetaFacil-APK-debug**. Ele executa compilação, lint e testes do núcleo; os testes de câmera/Compose exigem dispositivo ou emulador.
 
 ## Como usar
 
